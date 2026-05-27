@@ -5,12 +5,12 @@ const { useState, useEffect, useRef } = React;
 // 🔥 Firebase 설정 — 본인 값으로 교체하세요
 // ══════════════════════════════════════════
 const firebaseConfig = {
-  apiKey:            "여기에_본인_apiKey",
-  authDomain:        "여기에_본인_authDomain",
-  projectId:         "여기에_본인_projectId",
-  storageBucket:     "여기에_본인_storageBucket",
-  messagingSenderId: "여기에_본인_messagingSenderId",
-  appId:             "여기에_본인_appId"
+  apiKey:            "AIzaSyA1biDAx3uRu56rhmpjMBPPU03FhO5Kl4M",
+  authDomain:        "daun-garden.firebaseapp.com",
+  projectId:         "daun-garden",
+  storageBucket:     "daun-garden.firebasestorage.app",
+  messagingSenderId: "394498485480",
+  appId:             "1:394498485480:web:544d26a0ddb55f993e6d5d"
 };
 firebase.initializeApp(firebaseConfig);
 const db      = firebase.firestore();
