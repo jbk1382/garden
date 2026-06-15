@@ -7,25 +7,655 @@
   <meta name="theme-color" content="#2d6a4f" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-
-  <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-
-  <!-- React + Babel -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
+  <script src="https://unpkg.com/@babel/standalone@7.23.9/babel.min.js"></script>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-    html, body, #root { height: 100%; width: 100%; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8fdf8; }
-    #root { display: flex; flex-direction: column; }
+    *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+    html,body{height:100%;width:100%;background:#f8fdf8;}
+    #root{height:100%;}
   </style>
 </head>
 <body>
   <div id="root"></div>
-  <script type="text/babel" src="app.jsx"></script>
+  <script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyA1biDAx3uRu56rhmpjMBPPU03FhO5Kl4M",
+  authDomain:        "daun-garden.firebaseapp.com",
+  projectId:         "daun-garden",
+  storageBucket:     "daun-garden.firebasestorage.app",
+  messagingSenderId: "394498485480",
+  appId:             "1:394498485480:web:544d26a0ddb55f993e6d5d"
+};
+const COL = "daun-garden";
+const DOC = "main";
+
+let db = null;
+let IS_FIREBASE = false;
+try {
+  if (typeof firebase !== "undefined") {
+    if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.firestore();
+    IS_FIREBASE = true;
+  }
+} catch(e) { console.warn("Firebase 초기화 실패:", e); }
+
+const DEFAULT_CROPS = [
+  {id:"c1",icon:"🥬",name:"상추",desc:"무농약 재배",qty:15,reserved:0,unit:"묶음",order:0},
+  {id:"c2",icon:"🍅",name:"방울토마토",desc:"달콤한 텃밭 직수확",qty:20,reserved:0,unit:"개",order:1},
+  {id:"c3",icon:"🥒",name:"오이",desc:"아삭한 여름 오이",qty:8,reserved:0,unit:"개",order:2},
+  {id:"c4",icon:"🌿",name:"깻잎",desc:"향긋한 깻잎",qty:12,reserved:0,unit:"묶음",order:3},
+  {id:"c5",icon:"🧅",name:"대파",desc:"싱싱한 대파",qty:10,reserved:0,unit:"묶음",order:4},
+];
+const DEFAULT_SETTINGS = {
+  noticetitle:"이번 주 수확 안내",
+  noticebody:"상추, 방울토마토, 오이가 준비됐어요!",
+  adminpw:"1234",
+  maxqty:3,
+  slots:["10:00","10:30","11:00","11:30","12:00"],
+};
+
+const LS_KEY = "daun_garden_data";
+function loadLocal(){
+  try{const r=localStorage.getItem(LS_KEY);if(r)return JSON.parse(r);}catch(_){}
+  return {crops:DEFAULT_CROPS,settings:DEFAULT_SETTINGS,orders:[]};
+}
+function saveLocal(data){try{localStorage.setItem(LS_KEY,JSON.stringify(data));}catch(_){}}
+
+const CSS = `
+:root{--g1:#2d6a4f;--g2:#40916c;--g3:#52b788;--g5:#b7e4c7;--g6:#d8f3dc;--bg:#f8fdf8;--card:#fff;--border:#d0e8d4;--text:#1b3a2d;--muted:#5a7a6a;--hint:#9cb8ad;--r:14px;--rs:8px;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);}
+.app{max-width:420px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;}
+.header{background:var(--g1);color:#fff;padding:14px 16px 12px;padding-top:calc(env(safe-area-inset-top,0px) + 14px);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.header-title{font-size:17px;font-weight:700;letter-spacing:-.3px;}
+.header-sub{font-size:11px;opacity:.7;margin-top:1px;}
+.hbtn{background:rgba(255,255,255,.18);border:none;border-radius:20px;color:#fff;font-size:12px;padding:5px 12px;cursor:pointer;font-weight:600;}
+.screen{flex:1;overflow-y:auto;padding:12px 12px 90px;}
+.nav{background:var(--card);border-top:1px solid var(--border);display:flex;flex-shrink:0;position:sticky;bottom:0;padding-bottom:env(safe-area-inset-bottom,0px);}
+.nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 4px 8px;border:none;background:none;cursor:pointer;color:var(--muted);font-size:10px;}
+.nav-btn.active{color:var(--g1);}
+.nav-icon{font-size:22px;line-height:1;}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:14px;margin-bottom:10px;}
+.notice{background:#eaf7ee;border:1px solid var(--g5);border-radius:12px;padding:12px;margin-bottom:10px;}
+.notice-title{font-size:13px;font-weight:700;color:var(--g1);}
+.notice-body{font-size:12px;color:var(--muted);margin-top:4px;line-height:1.5;}
+.stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;}
+.stat-card{background:var(--card);border:1px solid var(--border);border-radius:var(--rs);padding:10px;text-align:center;}
+.stat-num{font-size:20px;font-weight:700;color:var(--g1);}
+.stat-label{font-size:10px;color:var(--muted);margin-top:2px;}
+.sec{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin:14px 0 8px;display:flex;align-items:center;gap:6px;}
+.sec::after{content:'';flex:1;height:1px;background:var(--border);}
+.crop-item{display:grid;grid-template-columns:52px 1fr auto;gap:10px;align-items:center;background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:12px;margin-bottom:8px;cursor:pointer;transition:.15s;}
+.crop-item:active{transform:scale(.98);}
+.crop-icon{width:50px;height:50px;border-radius:12px;background:var(--g6);display:flex;align-items:center;justify-content:center;font-size:28px;}
+.crop-name{font-size:15px;font-weight:600;}
+.crop-desc{font-size:12px;color:var(--muted);margin-top:2px;}
+.badge{display:inline-block;font-size:10px;padding:2px 7px;border-radius:20px;margin-top:3px;}
+.badge-green{background:var(--g6);color:var(--g1);}
+.badge-amber{background:#fef3d0;color:#8a6000;}
+.badge-red{background:#fde8e8;color:#c0392b;}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;align-items:flex-end;justify-content:center;}
+.overlay.open{display:flex;}
+.modal{background:var(--card);border-radius:20px 20px 0 0;width:100%;max-width:420px;padding:20px;max-height:88vh;overflow-y:auto;padding-bottom:calc(20px + env(safe-area-inset-bottom,0px));}
+.modal-handle{width:36px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 16px;}
+.modal-title{font-size:17px;font-weight:700;margin-bottom:16px;}
+.field{margin-bottom:12px;}
+.field label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:4px;}
+.field input,.field textarea{width:100%;border:1.5px solid var(--border);border-radius:8px;padding:9px 12px;font-size:14px;background:#fff;color:var(--text);outline:none;font-family:inherit;}
+.field input:focus,.field textarea:focus{border-color:var(--g2);}
+.field textarea{resize:vertical;min-height:60px;}
+.btn{display:flex;align-items:center;justify-content:center;gap:6px;border:none;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;padding:11px 16px;transition:.15s;width:100%;}
+.btn:active{transform:scale(.97);}
+.btn-primary{background:var(--g1);color:#fff;}
+.btn-outline{background:transparent;color:var(--g1);border:1.5px solid var(--g1);}
+.btn-red{background:#c0392b;color:#fff;}
+.btn-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;}
+.slots{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;}
+.slot{padding:6px 12px;border:1.5px solid var(--border);border-radius:20px;font-size:12px;cursor:pointer;color:var(--muted);user-select:none;}
+.slot.sel{background:var(--g1);color:#fff;border-color:var(--g1);}
+.qty-row{display:flex;align-items:center;gap:12px;margin-top:4px;}
+.qty-btn{width:34px;height:34px;border-radius:8px;border:1.5px solid var(--border);background:#fff;font-size:20px;cursor:pointer;color:var(--g1);}
+.qty-val{font-size:18px;font-weight:700;min-width:28px;text-align:center;}
+.tabs{display:flex;background:#eef5ee;border-radius:10px;padding:3px;margin-bottom:12px;gap:2px;}
+.tab{flex:1;text-align:center;padding:7px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;color:var(--muted);border:none;background:none;}
+.tab.active{background:var(--card);color:var(--g1);}
+.admin-crop{display:grid;grid-template-columns:40px 1fr auto;gap:8px;align-items:center;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:6px;}
+.admin-crop-icon{width:38px;height:38px;border-radius:8px;background:var(--g6);display:flex;align-items:center;justify-content:center;font-size:22px;}
+.icon-btn{width:32px;height:32px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;}
+.icon-btn.del{border-color:#fcc;}
+.req-item{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:8px;}
+.req-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+.req-name{font-size:14px;font-weight:700;}
+.req-time{font-size:11px;color:var(--muted);}
+.req-tag{background:var(--g6);color:var(--g1);border-radius:6px;padding:3px 8px;font-size:12px;display:inline-block;margin:2px 3px 2px 0;}
+.status-badge{font-size:11px;padding:3px 8px;border-radius:20px;font-weight:600;}
+.s-wait{background:#fff3cd;color:#856404;}
+.s-done{background:#d1f5e0;color:#1a6335;}
+.s-cancel{background:#fde8e8;color:#c0392b;}
+.chart-bar-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+.chart-label{font-size:10px;color:var(--muted);width:50px;text-align:right;flex-shrink:0;}
+.chart-bar-bg{flex:1;height:16px;background:#eef5ee;border-radius:4px;overflow:hidden;}
+.chart-bar-fill{height:100%;background:var(--g2);border-radius:4px;}
+.chart-val{font-size:11px;width:20px;flex-shrink:0;}
+.toggle-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);}
+.toggle-row:last-child{border-bottom:none;}
+.toggle{width:44px;height:24px;border-radius:12px;background:#ccc;border:none;cursor:pointer;position:relative;transition:.2s;flex-shrink:0;}
+.toggle.on{background:var(--g1);}
+.toggle::after{content:'';width:20px;height:20px;border-radius:10px;background:#fff;position:absolute;top:2px;left:2px;transition:.2s;}
+.toggle.on::after{left:22px;}
+.empty{text-align:center;padding:40px 20px;color:var(--hint);}
+.toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#1b3a2d;color:#fff;padding:10px 20px;border-radius:20px;font-size:13px;font-weight:600;z-index:999;pointer-events:none;opacity:0;transition:opacity .3s;white-space:nowrap;}
+.toast.show{opacity:1;}
+.fb-badge{position:fixed;top:calc(env(safe-area-inset-top,0px) + 6px);right:8px;font-size:10px;padding:3px 8px;border-radius:10px;z-index:999;}
+.fb-on{background:#d1f5e0;color:#1a6335;}
+.fb-off{background:#fff3cd;color:#856404;}
+`;
+
+function App() {
+  const [screen, setScreen]     = useState("home");
+  const [crops, setCrops]       = useState(DEFAULT_CROPS);
+  const [orders, setOrders]     = useState([]);
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [loading, setLoading]   = useState(true);
+  const [toast, setToast]       = useState("");
+  const [adminLogged, setAdminLogged] = useState(false);
+  const [adminTab, setAdminTab] = useState("crops");
+  const [reqTab, setReqTab]     = useState("wait");
+  const [adminPwInput, setAdminPwInput] = useState("");
+  const [settingsForm, setSettingsForm] = useState(DEFAULT_SETTINGS);
+
+  const [showOrderModal, setShowOrderModal] = useState(false);
+  const [showCropModal, setShowCropModal]   = useState(false);
+  const [editingCrop, setEditingCrop]       = useState(null);
+  const [selCropId, setSelCropId]           = useState(null);
+  const [ordName, setOrdName]   = useState("");
+  const [ordQty, setOrdQty]     = useState(1);
+  const [ordDate, setOrdDate]   = useState(new Date().toISOString().split("T")[0]);
+  const [ordSlot, setOrdSlot]   = useState("10:00");
+  const [ordMemo, setOrdMemo]   = useState("");
+  const [cropForm, setCropForm] = useState({icon:"🌿",name:"",desc:"",qty:10,unit:"묶음"});
+
+  const toastRef = useRef(null);
+
+  useEffect(() => {
+    if (IS_FIREBASE) {
+      const ref = db.collection(COL).doc(DOC);
+      const unsub = ref.onSnapshot(snap => {
+        if (snap.exists) {
+          const d = snap.data();
+          if (d.crops)    setCrops(d.crops);
+          if (d.orders)   setOrders(d.orders);
+          if (d.settings) { setSettings(d.settings); setSettingsForm(d.settings); }
+        } else {
+          ref.set({crops:DEFAULT_CROPS, orders:[], settings:DEFAULT_SETTINGS});
+        }
+        setLoading(false);
+      }, () => setLoading(false));
+      return () => unsub();
+    } else {
+      const local = loadLocal();
+      setCrops(local.crops || DEFAULT_CROPS);
+      setOrders(local.orders || []);
+      const s = local.settings || DEFAULT_SETTINGS;
+      setSettings(s); setSettingsForm(s);
+      setLoading(false);
+    }
+  }, []);
+
+  const persist = useCallback(async (c, o, s) => {
+    const data = {crops: c??crops, orders: o??orders, settings: s??settings};
+    if (IS_FIREBASE) {
+      try { await db.collection(COL).doc(DOC).set(data); } catch(e) { console.error(e); }
+    } else {
+      saveLocal(data);
+    }
+  }, [crops, orders, settings]);
+
+  const showToast = msg => {
+    setToast(msg);
+    if (toastRef.current) clearTimeout(toastRef.current);
+    toastRef.current = setTimeout(() => setToast(""), 2500);
+  };
+
+  const getAvail = c => Math.max(0, c.qty - c.reserved);
+  const getBadge = c => {
+    const a = getAvail(c);
+    if (a <= 0) return <span className="badge badge-red">품절</span>;
+    if (a <= 3) return <span className="badge badge-amber">잔여 {a}{c.unit}</span>;
+    return <span className="badge badge-green">여유 {a}{c.unit}</span>;
+  };
+
+  const openOrder = cropId => {
+    setSelCropId(cropId);
+    setOrdQty(1); setOrdName(""); setOrdMemo("");
+    setOrdDate(new Date().toISOString().split("T")[0]);
+    setOrdSlot(settings.slots?.[0] || "10:00");
+    setShowOrderModal(true);
+  };
+
+  const submitOrder = async () => {
+    if (!ordName.trim()) { showToast("이름을 입력해주세요"); return; }
+    const crop = crops.find(c => c.id === selCropId);
+    if (!crop) return;
+    if (getAvail(crop) < ordQty) { showToast("재고가 부족해요"); return; }
+    const newOrder = {
+      id: "o"+Date.now(), name: ordName.trim(),
+      cropId: crop.id, cropName: crop.name, cropIcon: crop.icon,
+      qty: ordQty, unit: crop.unit,
+      date: ordDate, time: ordSlot, memo: ordMemo.trim(),
+      status: "wait", createdAt: new Date().toISOString(),
+    };
+    const nc = crops.map(c => c.id===crop.id ? {...c, reserved: c.reserved+ordQty} : c);
+    const no = [newOrder, ...orders];
+    setCrops(nc); setOrders(no);
+    await persist(nc, no, null);
+    setShowOrderModal(false);
+    showToast(`✅ ${ordName}님 신청 완료!`);
+  };
+
+  const confirmOrder = async id => {
+    const no = orders.map(o => o.id===id ? {...o, status:"done"} : o);
+    setOrders(no); await persist(null, no, null);
+    showToast("✅ 수령 확인됐어요");
+  };
+
+  const cancelOrder = async id => {
+    const ord = orders.find(o => o.id===id);
+    if (!ord || ord.status!=="wait") return;
+    const nc = crops.map(c => c.id===ord.cropId ? {...c, reserved:Math.max(0,c.reserved-ord.qty)} : c);
+    const no = orders.map(o => o.id===id ? {...o, status:"cancel"} : o);
+    setCrops(nc); setOrders(no);
+    await persist(nc, no, null);
+    showToast("신청이 취소됐어요");
+  };
+
+  const openAddCrop = () => {
+    setEditingCrop(null);
+    setCropForm({icon:"🌿",name:"",desc:"",qty:10,unit:"묶음"});
+    setShowCropModal(true);
+  };
+  const openEditCrop = c => {
+    setEditingCrop(c);
+    setCropForm({icon:c.icon,name:c.name,desc:c.desc,qty:c.qty,unit:c.unit});
+    setShowCropModal(true);
+  };
+  const saveCrop = async () => {
+    if (!cropForm.name.trim()) { showToast("이름을 입력해주세요"); return; }
+    let nc;
+    if (editingCrop) {
+      nc = crops.map(c => c.id===editingCrop.id ? {...c,...cropForm} : c);
+    } else {
+      nc = [...crops, {...cropForm, id:"c"+Date.now(), reserved:0, order:crops.length}];
+    }
+    setCrops(nc); await persist(nc, null, null);
+    setShowCropModal(false);
+    showToast(editingCrop ? "수정됐어요" : "작물이 추가됐어요 🌱");
+  };
+  const deleteCrop = async id => {
+    if (!window.confirm("정말 삭제할까요?")) return;
+    const nc = crops.filter(c => c.id!==id);
+    setCrops(nc); await persist(nc, null, null);
+    showToast("삭제됐어요");
+  };
+  const moveCrop = async (idx, dir) => {
+    const arr = [...crops];
+    const t = idx+dir;
+    if (t<0 || t>=arr.length) return;
+    [arr[idx], arr[t]] = [arr[t], arr[idx]];
+    setCrops(arr); await persist(arr, null, null);
+  };
+  const resetReserved = async id => {
+    const nc = crops.map(c => c.id===id ? {...c, reserved:0} : c);
+    setCrops(nc); await persist(nc, null, null);
+    showToast("예약 수량이 초기화됐어요");
+  };
+  const saveSettings = async () => {
+    setSettings(settingsForm);
+    await persist(null, null, settingsForm);
+    showToast("설정이 저장됐어요");
+  };
+
+  if (loading) return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",background:"#f8fdf8"}}>
+      <div style={{fontSize:"52px",marginBottom:"14px"}}>🌿</div>
+      <div style={{fontSize:"15px",color:"#5a7a6a"}}>불러오는 중...</div>
+    </div>
+  );
+
+  const sorted = [...crops].sort((a,b)=>(a.order||0)-(b.order||0));
+  const waitCnt = orders.filter(o=>o.status==="wait").length;
+  const filteredReqs = orders.filter(o=>o.status===reqTab);
+
+  return (
+    <div className="app">
+      <style>{CSS}</style>
+      <div className={`fb-badge ${IS_FIREBASE?"fb-on":"fb-off"}`}>
+        {IS_FIREBASE ? "🔥 실시간 연결됨" : "💾 로컬 모드"}
+      </div>
+
+      {/* 헤더 */}
+      <div className="header">
+        <div>
+          <div className="header-title">🌿 다운 텃밭 나눔</div>
+          <div className="header-sub">신선한 수확물을 나눠요</div>
+        </div>
+        {waitCnt > 0 && <span style={{background:"rgba(255,255,255,.2)",borderRadius:"20px",padding:"4px 10px",fontSize:"12px",fontWeight:"700"}}>📋 대기 {waitCnt}</span>}
+      </div>
+
+      {/* 홈 */}
+      {screen==="home" && (
+        <div className="screen">
+          <div className="notice">
+            <div className="notice-title">🌱 {settings.noticetitle}</div>
+            <div className="notice-body">{settings.noticebody}</div>
+          </div>
+          <div className="stats-grid">
+            <div className="stat-card"><div className="stat-num">{crops.length}</div><div className="stat-label">수확 중인 작물</div></div>
+            <div className="stat-card"><div className="stat-num">{waitCnt}</div><div className="stat-label">대기 중 신청</div></div>
+            <div className="stat-card"><div className="stat-num">{orders.length}</div><div className="stat-label">총 나눔 횟수</div></div>
+          </div>
+          <div className="sec">오늘 수령 가능 작물</div>
+          {sorted.length===0 && <div className="empty"><div style={{fontSize:"40px"}}>🌱</div><div style={{fontSize:"14px",marginTop:"8px"}}>등록된 작물이 없어요</div></div>}
+          {sorted.map(c => (
+            <div key={c.id} className="crop-item" onClick={()=>openOrder(c.id)}>
+              <div className="crop-icon">{c.icon}</div>
+              <div>
+                <div className="crop-name">{c.name}</div>
+                <div className="crop-desc">{c.desc}</div>
+                {getBadge(c)}
+              </div>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:"22px",fontWeight:"700",color:"var(--g1)"}}>{getAvail(c)}</div>
+                <div style={{fontSize:"10px",color:"var(--hint)"}}>{c.unit} 남음</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 내 신청 */}
+      {screen==="my" && (
+        <div className="screen">
+          <div className="sec">신청 내역</div>
+          {orders.length===0 && <div className="empty"><div style={{fontSize:"40px"}}>📋</div><div style={{fontSize:"14px",marginTop:"8px"}}>신청 내역이 없어요</div></div>}
+          {orders.slice(0,20).map(o => (
+            <div key={o.id} className="req-item">
+              <div className="req-header">
+                <div className="req-name">{o.cropIcon} {o.cropName}</div>
+                <div className="req-time">{o.date} {o.time}</div>
+              </div>
+              <div style={{marginBottom:"6px"}}>
+                <span className="req-tag">👤 {o.name}</span>
+                <span className="req-tag">📦 {o.qty}{o.unit}</span>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:"12px",color:"var(--muted)"}}>{o.memo||"메모 없음"}</span>
+                <span className={`status-badge ${o.status==="wait"?"s-wait":o.status==="done"?"s-done":"s-cancel"}`}>
+                  {o.status==="wait"?"대기 중":o.status==="done"?"완료":"취소됨"}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 관리자 */}
+      {screen==="admin" && (
+        <div className="screen">
+          {!adminLogged ? (
+            <div className="card" style={{textAlign:"center",padding:"32px 20px",marginTop:"20px"}}>
+              <div style={{fontSize:"52px",marginBottom:"14px"}}>🔒</div>
+              <div style={{fontSize:"16px",fontWeight:"700",marginBottom:"6px"}}>관리자 메뉴</div>
+              <div style={{fontSize:"13px",color:"var(--muted)",marginBottom:"18px"}}>비밀번호를 입력하세요</div>
+              <div className="field">
+                <input type="password" placeholder="비밀번호"
+                  style={{textAlign:"center",fontSize:"20px",letterSpacing:"8px"}}
+                  value={adminPwInput}
+                  onChange={e=>setAdminPwInput(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&(adminPwInput===settings.adminpw?(setAdminLogged(true),setAdminPwInput("")):showToast("비밀번호가 틀렸어요"))}
+                />
+              </div>
+              <button className="btn btn-primary" onClick={()=>{
+                if(adminPwInput===settings.adminpw){setAdminLogged(true);setAdminPwInput("");}
+                else showToast("비밀번호가 틀렸어요");
+              }}>🔓 로그인</button>
+            </div>
+          ) : (
+            <>
+              <div className="tabs">
+                {[["crops","🥬 작물"],["requests","📋 신청"],["stats","📊 통계"],["settings","⚙️ 설정"]].map(([k,l]) => (
+                  <button key={k} className={`tab ${adminTab===k?"active":""}`} onClick={()=>setAdminTab(k)}>{l}</button>
+                ))}
+              </div>
+
+              {adminTab==="crops" && (
+                <div>
+                  <button className="btn btn-outline" style={{marginBottom:"10px"}} onClick={openAddCrop}>➕ 작물 추가</button>
+                  {sorted.map((c,i) => (
+                    <div key={c.id} className="admin-crop">
+                      <div className="admin-crop-icon">{c.icon}</div>
+                      <div>
+                        <div style={{fontSize:"14px",fontWeight:"600"}}>{c.name}</div>
+                        <div style={{fontSize:"11px",color:"var(--muted)"}}>재고 {c.qty} | 예약 {c.reserved} | 잔여 {getAvail(c)}</div>
+                      </div>
+                      <div style={{display:"flex",gap:"4px",flexWrap:"wrap",justifyContent:"flex-end"}}>
+                        <button className="icon-btn" onClick={()=>moveCrop(i,-1)}>⬆️</button>
+                        <button className="icon-btn" onClick={()=>moveCrop(i,1)}>⬇️</button>
+                        <button className="icon-btn" onClick={()=>openEditCrop(c)}>✏️</button>
+                        <button className="icon-btn" onClick={()=>resetReserved(c.id)}>🔄</button>
+                        <button className="icon-btn del" onClick={()=>deleteCrop(c.id)}>🗑️</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {adminTab==="requests" && (
+                <div>
+                  <div className="tabs">
+                    {[["wait",`대기 (${orders.filter(o=>o.status==="wait").length})`],["done","완료"],["cancel","취소"]].map(([k,l]) => (
+                      <button key={k} className={`tab ${reqTab===k?"active":""}`} onClick={()=>setReqTab(k)}>{l}</button>
+                    ))}
+                  </div>
+                  {filteredReqs.length===0 && <div className="empty"><div style={{fontSize:"36px"}}>📋</div><div style={{fontSize:"14px",marginTop:"8px"}}>내역이 없어요</div></div>}
+                  {filteredReqs.map(o => (
+                    <div key={o.id} className="req-item">
+                      <div className="req-header">
+                        <div className="req-name">👤 {o.name}</div>
+                        <div className="req-time">{o.date} {o.time}</div>
+                      </div>
+                      <div style={{marginBottom:"8px"}}>
+                        <span className="req-tag">{o.cropIcon} {o.cropName}</span>
+                        <span className="req-tag">📦 {o.qty}{o.unit}</span>
+                      </div>
+                      {o.memo && <div style={{fontSize:"12px",color:"var(--muted)",marginBottom:"8px"}}>💬 {o.memo}</div>}
+                      <div style={{display:"flex",justifyContent:"flex-end"}}>
+                        <span className={`status-badge ${o.status==="wait"?"s-wait":o.status==="done"?"s-done":"s-cancel"}`}>
+                          {o.status==="wait"?"대기 중":o.status==="done"?"완료":"취소됨"}
+                        </span>
+                      </div>
+                      {o.status==="wait" && (
+                        <div className="btn-row">
+                          <button className="btn btn-primary" style={{fontSize:"12px",padding:"8px"}} onClick={()=>confirmOrder(o.id)}>✅ 수령 확인</button>
+                          <button className="btn btn-red" style={{fontSize:"12px",padding:"8px"}} onClick={()=>cancelOrder(o.id)}>❌ 취소</button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {adminTab==="stats" && (
+                <div>
+                  <div className="stats-grid">
+                    <div className="stat-card"><div className="stat-num">{orders.filter(o=>o.status==="done").length}</div><div className="stat-label">완료</div></div>
+                    <div className="stat-card"><div className="stat-num">{waitCnt}</div><div className="stat-label">대기</div></div>
+                    <div className="stat-card"><div className="stat-num">{orders.length}</div><div className="stat-label">전체</div></div>
+                  </div>
+                  <div className="card">
+                    <div style={{fontSize:"13px",fontWeight:"700",marginBottom:"10px"}}>작물별 신청 현황</div>
+                    {crops.map(c => {
+                      const cnt = orders.filter(o=>o.cropId===c.id).length;
+                      const max = Math.max(...crops.map(cc=>orders.filter(o=>o.cropId===cc.id).length),1);
+                      return (
+                        <div key={c.id} className="chart-bar-row">
+                          <div className="chart-label">{c.icon} {c.name.slice(0,3)}</div>
+                          <div className="chart-bar-bg"><div className="chart-bar-fill" style={{width:`${Math.round(cnt/max*100)}%`}}></div></div>
+                          <div className="chart-val">{cnt}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="card">
+                    <div style={{fontSize:"13px",fontWeight:"700",marginBottom:"10px"}}>시간대별 신청 현황</div>
+                    {(settings.slots||DEFAULT_SETTINGS.slots).map(sl => {
+                      const cnt = orders.filter(o=>o.time===sl).length;
+                      const max = Math.max(...(settings.slots||DEFAULT_SETTINGS.slots).map(s=>orders.filter(o=>o.time===s).length),1);
+                      return (
+                        <div key={sl} className="chart-bar-row">
+                          <div className="chart-label">{sl}</div>
+                          <div className="chart-bar-bg"><div className="chart-bar-fill" style={{width:`${Math.round(cnt/max*100)}%`}}></div></div>
+                          <div className="chart-val">{cnt}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {adminTab==="settings" && (
+                <div>
+                  <div className="card">
+                    <div style={{fontSize:"14px",fontWeight:"700",marginBottom:"12px"}}>📣 공지사항</div>
+                    <div className="field"><label>제목</label>
+                      <input type="text" value={settingsForm.noticetitle} onChange={e=>setSettingsForm({...settingsForm,noticetitle:e.target.value})}/>
+                    </div>
+                    <div className="field"><label>내용</label>
+                      <textarea rows="3" value={settingsForm.noticebody} onChange={e=>setSettingsForm({...settingsForm,noticebody:e.target.value})}/>
+                    </div>
+                  </div>
+                  <div className="card">
+                    <div style={{fontSize:"14px",fontWeight:"700",marginBottom:"10px"}}>🛠 운영 설정</div>
+                    <div className="field"><label>1인 최대 수령량</label>
+                      <input type="number" min="1" max="10" value={settingsForm.maxqty} onChange={e=>setSettingsForm({...settingsForm,maxqty:Number(e.target.value)})}/>
+                    </div>
+                    <div className="field"><label>관리자 비밀번호 변경</label>
+                      <input type="password" placeholder="새 비밀번호 입력" value={settingsForm.adminpw} onChange={e=>setSettingsForm({...settingsForm,adminpw:e.target.value})}/>
+                    </div>
+                  </div>
+                  <button className="btn btn-primary" style={{marginBottom:"8px"}} onClick={saveSettings}>💾 설정 저장</button>
+                  <button className="btn btn-red" onClick={()=>{setAdminLogged(false);setAdminPwInput("");}}>🔒 로그아웃</button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* 하단 네비 */}
+      <nav className="nav">
+        {[["home","🏡","홈"],["my","📋","내 신청"],["admin","🔧","관리자"]].map(([k,ic,lb]) => (
+          <button key={k} className={`nav-btn ${screen===k?"active":""}`} onClick={()=>setScreen(k)}>
+            <div className="nav-icon">{ic}</div><span>{lb}</span>
+          </button>
+        ))}
+      </nav>
+
+      {/* 신청 모달 */}
+      {showOrderModal && (
+        <div className="overlay open" onClick={e=>e.target===e.currentTarget&&setShowOrderModal(false)}>
+          <div className="modal">
+            <div className="modal-handle"></div>
+            <div className="modal-title">📦 작물 수령 신청</div>
+            {(() => {
+              const c = crops.find(x=>x.id===selCropId);
+              return c ? (
+                <div style={{background:"var(--g6)",borderRadius:"10px",padding:"10px",marginBottom:"12px",display:"flex",alignItems:"center",gap:"10px"}}>
+                  <span style={{fontSize:"28px"}}>{c.icon}</span>
+                  <div><div style={{fontWeight:"700"}}>{c.name}</div><div style={{fontSize:"12px",color:"var(--muted)"}}>잔여 {getAvail(c)}{c.unit}</div></div>
+                </div>
+              ) : null;
+            })()}
+            <div className="field"><label>이름</label>
+              <input type="text" placeholder="홍길동" value={ordName} onChange={e=>setOrdName(e.target.value)}/>
+            </div>
+            <div className="field"><label>수량</label>
+              <div className="qty-row">
+                <button className="qty-btn" onClick={()=>setOrdQty(v=>Math.max(1,v-1))}>−</button>
+                <div className="qty-val">{ordQty}</div>
+                <button className="qty-btn" onClick={()=>setOrdQty(v=>Math.min(settings.maxqty||3,v+1))}>＋</button>
+                <span style={{fontSize:"12px",color:"var(--muted)"}}>최대 {settings.maxqty||3}개</span>
+              </div>
+            </div>
+            <div className="field"><label>수령 날짜</label>
+              <input type="date" value={ordDate} onChange={e=>setOrdDate(e.target.value)}/>
+            </div>
+            <div className="field"><label>수령 시간</label>
+              <div className="slots">
+                {(settings.slots||DEFAULT_SETTINGS.slots).map(s=>(
+                  <div key={s} className={`slot ${ordSlot===s?"sel":""}`} onClick={()=>setOrdSlot(s)}>{s}</div>
+                ))}
+              </div>
+            </div>
+            <div className="field"><label>메모 (선택)</label>
+              <textarea placeholder="특이사항 등" value={ordMemo} onChange={e=>setOrdMemo(e.target.value)}/>
+            </div>
+            <div className="btn-row">
+              <button className="btn btn-outline" onClick={()=>setShowOrderModal(false)}>취소</button>
+              <button className="btn btn-primary" onClick={submitOrder}>신청하기 🌿</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 작물 추가/수정 모달 */}
+      {showCropModal && (
+        <div className="overlay open" onClick={e=>e.target===e.currentTarget&&setShowCropModal(false)}>
+          <div className="modal">
+            <div className="modal-handle"></div>
+            <div className="modal-title">{editingCrop?"✏️ 작물 수정":"🌱 작물 추가"}</div>
+            <div className="field"><label>이름</label>
+              <input type="text" placeholder="예: 상추" value={cropForm.name} onChange={e=>setCropForm({...cropForm,name:e.target.value})}/>
+            </div>
+            <div className="field"><label>이모지 아이콘</label>
+              <input type="text" placeholder="🥬" style={{fontSize:"24px",textAlign:"center"}} value={cropForm.icon} onChange={e=>setCropForm({...cropForm,icon:e.target.value})}/>
+            </div>
+            <div className="field"><label>재고 수량</label>
+              <div className="qty-row">
+                <button className="qty-btn" onClick={()=>setCropForm({...cropForm,qty:Math.max(0,cropForm.qty-1)})}>−</button>
+                <div className="qty-val">{cropForm.qty}</div>
+                <button className="qty-btn" onClick={()=>setCropForm({...cropForm,qty:cropForm.qty+1})}>＋</button>
+              </div>
+            </div>
+            <div className="field"><label>설명</label>
+              <input type="text" placeholder="무농약 재배, 텃밭 직수확" value={cropForm.desc} onChange={e=>setCropForm({...cropForm,desc:e.target.value})}/>
+            </div>
+            <div className="field"><label>단위</label>
+              <div className="slots">
+                {["묶음","개","kg","봉지"].map(u=>(
+                  <div key={u} className={`slot ${cropForm.unit===u?"sel":""}`} onClick={()=>setCropForm({...cropForm,unit:u})}>{u}</div>
+                ))}
+              </div>
+            </div>
+            <div className="btn-row">
+              <button className="btn btn-outline" onClick={()=>setShowCropModal(false)}>취소</button>
+              <button className="btn btn-primary" onClick={saveCrop}>저장</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className={`toast ${toast?"show":""}`}>{toast}</div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+  </script>
 </body>
 </html>
